@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+*.egg
+
+# Env / secrets
+.env
+*.env
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# dbt
+target/
+dbt_packages/
+logs/
+profiles.yml
+
+# Grafana
+grafana/provisioning/
+
+# Edge Impulse
+ml/*.zip
+ml/edge-impulse-sdk/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/

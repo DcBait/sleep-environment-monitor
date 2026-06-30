@@ -1,0 +1,12 @@
+sleep_monitor:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: <oracle-vm-ip>
+      port: 5432
+      user: <db-user>
+      password: <db-password>
+      dbname: sleep_monitor
+      schema: public
+      threads: 4
