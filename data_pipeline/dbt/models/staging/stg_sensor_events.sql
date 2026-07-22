@@ -9,7 +9,7 @@ SELECT
     CAST(temperature AS NUMERIC(5, 2)) AS temperature,
     CAST(humidity    AS NUMERIC(5, 2)) AS humidity,
     CAST(pressure    AS NUMERIC(7, 2)) AS pressure,
-    snore_detected::BOOLEAN            AS snore_detected
+    (snore_detected = 1)               AS snore_detected
 FROM source
 WHERE
     temperature  BETWEEN -10  AND 60
