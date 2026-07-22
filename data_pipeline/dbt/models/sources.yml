@@ -1,0 +1,24 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: public
+    description: "Raw sensor data written by the MQTT subscriber"
+    tables:
+      - name: raw_sensor_events
+        description: "One row per ESP32 publish (every 30 s)"
+        columns:
+          - name: id
+            description: "Serial primary key"
+          - name: event_ts
+            description: "Sensor timestamp converted from Unix epoch by the subscriber"
+          - name: received_at
+            description: "Server wall-clock time when the MQTT message arrived"
+          - name: temperature
+            description: "Bedroom temperature in °C"
+          - name: humidity
+            description: "Relative humidity %"
+          - name: pressure
+            description: "Barometric pressure in hPa"
+          - name: snore_detected
+            description: "Binary snore flag: 1 = snore event detected in this 30-s window"

@@ -1,0 +1,35 @@
+version: 2
+
+models:
+  - name: stg_sensor_events
+    description: "Cleaned and typed sensor readings; one row per ESP32 publish"
+    columns:
+      - name: id
+        description: "Primary key from the raw table"
+        tests:
+          - unique
+          - not_null
+      - name: event_ts
+        description: "Sensor timestamp (TIMESTAMPTZ)"
+        tests:
+          - not_null
+      - name: received_at
+        description: "Server ingestion timestamp (TIMESTAMPTZ)"
+        tests:
+          - not_null
+      - name: temperature
+        description: "Temperature in °C, out-of-range rows excluded"
+        tests:
+          - not_null
+      - name: humidity
+        description: "Relative humidity %, out-of-range rows excluded"
+        tests:
+          - not_null
+      - name: pressure
+        description: "Barometric pressure in hPa, out-of-range rows excluded"
+        tests:
+          - not_null
+      - name: snore_detected
+        description: "True if a snore event was detected in this 30-s window"
+        tests:
+          - not_null

@@ -1,8 +1,9 @@
 #pragma once
 
-// WiFi
-#define WIFI_SSID ""
-#define WIFI_PASSWORD ""
+// WiFi — credentials managed by WiFiManager, no hardcoding needed.
+// First boot: ESP32 creates hotspot "sleep-monitor-setup".
+// Connect with your phone → open 192.168.4.1 → enter WiFi password.
+// To switch networks (e.g. going on exchange): hold BOOT button while powering on.
 
 // MQTT
 #define MQTT_BROKER ""
@@ -19,5 +20,15 @@
 #define I2S_SCK 14
 #define I2S_SD  32
 
+// Session toggle button (BOOT button on most ESP32 dev boards)
+#define BOOT_BUTTON_PIN 0
+
 // Publish interval (ms)
 #define PUBLISH_INTERVAL_MS 30000
+
+// NTP
+#define NTP_SERVER "pool.ntp.org"
+
+// Snore detection — RMS energy threshold (24-bit audio scale).
+// Print raw RMS values to Serial on first use and tune this.
+#define SNORE_RMS_THRESHOLD 80000
