@@ -31,4 +31,13 @@
 
 // Snore detection — RMS energy threshold (24-bit audio scale).
 // Print raw RMS values to Serial on first use and tune this.
-#define SNORE_RMS_THRESHOLD 80000
+#define SNORE_RMS_THRESHOLD 300000
+
+// A burst must stay above threshold this long to count as a candidate —
+// filters out brief transient noise (taps, clicks).
+#define SNORE_MIN_BURST_MS 300
+
+// A candidate only becomes a confirmed snore event if another candidate
+// happened within this many ms — snoring repeats every breath, so a real
+// snore pattern satisfies this while a one-off noise (door, cough) doesn't.
+#define SNORE_PATTERN_WINDOW_MS 15000

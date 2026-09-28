@@ -22,7 +22,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 DB_DSN = os.environ["DB_DSN"]
 
-MODEL = "claude-opus-4-8"
+MODEL = "claude-sonnet-5"
 
 QUERY = """
 SELECT

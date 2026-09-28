@@ -28,21 +28,44 @@ Adafruit_BME280    bme;
 Adafruit_SSD1306   oled(OLED_W, OLED_H, &Wire, -1);
 
 // ── State ─────────────────────────────────────────────────────────────────────
+enum DisplayState { DISP_IDLE, DISP_RECORDING, DISP_SUMMARY };
+
 volatile bool          sessionActive    = false;
 volatile unsigned long lastButtonMs     = 0;
+volatile DisplayState  displayState     = DISP_IDLE;
+volatile bool          displayDirty     = true;
 unsigned long          lastPublishMs    = 0;
 uint32_t               snoreCount       = 0;
+
+// Continuous snore-event detection state (see pollAudio()).
+volatile bool          snoreDetectedThisWindow = false;  // any event since last publish
+bool                    burstActive             = false; // currently inside a loud burst
+unsigned long           burstStartMs            = 0;
+bool                    burstCounted            = false; // has current burst become a candidate?
+unsigned long           lastCandidateMs         = 0;      // time of the previous confirmed candidate
 
 float lastTemp = 0, lastHumid = 0, lastPressure = 0;
 bool  lastSnore = false;
 
 // ── BOOT button ISR ───────────────────────────────────────────────────────────
+// Display only redraws on start/stop (see displayDirty), not every publish —
+// an OLED refreshing every 30-60s next to the bed is disruptive to sleep.
 void IRAM_ATTR onBootButton() {
     unsigned long now = millis();
     if (now - lastButtonMs < 300) return;   // debounce
     lastButtonMs = now;
     sessionActive = !sessionActive;
-    if (!sessionActive) snoreCount = 0;     // reset count when session stops
+    if (sessionActive) {
+        snoreCount              = 0;    // reset count when a new session starts
+        snoreDetectedThisWindow = false;
+        burstActive             = false;
+        burstCounted            = false;
+        lastCandidateMs         = 0;
+        displayState = DISP_RECORDING;
+    } else {
+        displayState = DISP_SUMMARY;    // show last night's data until next start
+    }
+    displayDirty = true;
 }
 
 // ── WiFi ──────────────────────────────────────────────────────────────────────
@@ -118,31 +141,62 @@ void initI2S() {
     i2s_set_pin(I2S_PORT, &pins);
 }
 
-// Sample 1 second of audio and return true if RMS exceeds snore threshold.
-// On first deployment: watch Serial for "RMS:" values and set SNORE_RMS_THRESHOLD
-// to roughly halfway between your quiet-room baseline and a snore event.
-bool detectSnore() {
+// Continuous snore-event detection — called every loop() iteration while a
+// session is active. Reads one short audio chunk (~32ms at 16kHz) and looks
+// for a repeating pattern of sustained loud bursts, rather than treating any
+// single threshold crossing as a snore:
+//   1. A burst must stay above threshold for SNORE_MIN_BURST_MS before it
+//      counts as a candidate at all — filters brief transient noise (taps,
+//      clicks) that spike and vanish in milliseconds.
+//   2. A candidate only becomes a confirmed event if another candidate
+//      happened within SNORE_PATTERN_WINDOW_MS — snoring repeats every
+//      breath, so a real pattern satisfies this while a one-off noise
+//      (door, cough, aircon kicking on) doesn't, even if it's loud and
+//      sustained.
+//
+// On first deployment: watch Serial for "Audio RMS:" values and set
+// SNORE_RMS_THRESHOLD to sit above your quiet-room baseline noise floor.
+void pollAudio() {
+    static unsigned long lastPrintMs = 0;
+
     int32_t buf[I2S_BUF];
-    size_t  bytesRead;
-    int64_t sumSq        = 0;
-    int32_t totalSamples = 0;
+    size_t  bytesRead = 0;
+    i2s_read(I2S_PORT, buf, sizeof(buf), &bytesRead, pdMS_TO_TICKS(50));
+    int n = bytesRead / sizeof(int32_t);
+    if (n == 0) return;
 
-    unsigned long t0 = millis();
-    while (millis() - t0 < 1000) {
-        i2s_read(I2S_PORT, buf, sizeof(buf), &bytesRead, portMAX_DELAY);
-        int n = bytesRead / sizeof(int32_t);
-        for (int i = 0; i < n; i++) {
-            // INMP441 puts 24-bit audio in the upper bits of a 32-bit frame
-            int32_t s = buf[i] >> 8;
-            sumSq += (int64_t)s * s;
-        }
-        totalSamples += n;
+    int64_t sumSq = 0;
+    for (int i = 0; i < n; i++) {
+        // INMP441 puts 24-bit audio in the upper bits of a 32-bit frame
+        int32_t s = buf[i] >> 8;
+        sumSq += (int64_t)s * s;
     }
-    if (totalSamples == 0) return false;
+    double rms = sqrt((double)sumSq / n);
 
-    double rms = sqrt((double)sumSq / totalSamples);
-    Serial.printf("Audio RMS: %.0f  threshold: %d\n", rms, SNORE_RMS_THRESHOLD);
-    return rms > SNORE_RMS_THRESHOLD;
+    if (millis() - lastPrintMs >= 1000) {
+        Serial.printf("Audio RMS: %.0f  threshold: %d\n", rms, SNORE_RMS_THRESHOLD);
+        lastPrintMs = millis();
+    }
+
+    unsigned long now = millis();
+    if (rms > SNORE_RMS_THRESHOLD) {
+        if (!burstActive) {
+            burstActive  = true;
+            burstStartMs = now;
+            burstCounted = false;
+        } else if (!burstCounted && now - burstStartMs >= SNORE_MIN_BURST_MS) {
+            burstCounted = true;   // sustained long enough to be a real candidate
+            if (lastCandidateMs != 0 && now - lastCandidateMs <= SNORE_PATTERN_WINDOW_MS) {
+                // a previous candidate happened recently too — a repeating
+                // rhythm, consistent with snoring rather than a one-off noise
+                snoreDetectedThisWindow = true;
+                snoreCount++;
+            }
+            lastCandidateMs = now;
+        }
+    } else {
+        burstActive = false;   // dropped quiet — next loud burst starts fresh
+    }
 }
 
 // ── OLED ──────────────────────────────────────────────────────────────────────
@@ -150,23 +204,30 @@ void updateDisplay() {
     oled.clearDisplay();
     oled.setTextColor(SSD1306_WHITE);
 
-    if (!sessionActive) {
-        oled.setTextSize(2);
-        oled.setCursor(18, 8);  oled.println("SLEEP");
-        oled.setCursor(8,  32); oled.println("MONITOR");
-        oled.setTextSize(1);
-        oled.setCursor(4, 56);  oled.println("BOOT = start session");
-    } else {
-        oled.setTextSize(1);
-        oled.setCursor(0, 0);  oled.printf("Temp    %.1f C\n",   lastTemp);
-        oled.setCursor(0, 12); oled.printf("Humid   %.1f %%\n",  lastHumid);
-        oled.setCursor(0, 24); oled.printf("Press   %.0f hPa\n", lastPressure);
-        oled.setCursor(0, 36); oled.printf("Snores  %lu\n",      snoreCount);
-        oled.setCursor(0, 52); oled.setTextSize(1);
-        oled.fillRect(88, 50, 40, 12, SSD1306_WHITE);
-        oled.setTextColor(SSD1306_BLACK);
-        oled.setCursor(91, 52); oled.print("  REC  ");
-        oled.setTextColor(SSD1306_WHITE);
+    switch (displayState) {
+        case DISP_IDLE:
+            oled.setTextSize(2);
+            oled.setCursor(18, 8);  oled.println("SLEEP");
+            oled.setCursor(8,  32); oled.println("MONITOR");
+            oled.setTextSize(1);
+            oled.setCursor(4, 56);  oled.println("BOOT = start session");
+            break;
+
+        case DISP_RECORDING:
+            oled.setTextSize(2);
+            oled.setCursor(4, 20);  oled.println("RECORDING");
+            oled.setTextSize(1);
+            oled.setCursor(0, 52);  oled.println("BOOT = stop session");
+            break;
+
+        case DISP_SUMMARY:
+            oled.setTextSize(1);
+            oled.setCursor(0, 0);  oled.printf("Last Temp   %.1f C\n",   lastTemp);
+            oled.setCursor(0, 12); oled.printf("Last Humid  %.1f %%\n",  lastHumid);
+            oled.setCursor(0, 24); oled.printf("Last Press  %.0f hPa\n", lastPressure);
+            oled.setCursor(0, 36); oled.printf("Snores      %lu\n",      snoreCount);
+            oled.setCursor(0, 52); oled.println("BOOT = new session");
+            break;
     }
     oled.display();
 }
@@ -176,8 +237,8 @@ void publishReading() {
     lastTemp     = bme.readTemperature();
     lastHumid    = bme.readHumidity();
     lastPressure = bme.readPressure() / 100.0f;
-    lastSnore    = detectSnore();
-    if (lastSnore) snoreCount++;
+    lastSnore    = snoreDetectedThisWindow;   // any event since the last publish
+    snoreDetectedThisWindow = false;          // reset for the next interval
 
     StaticJsonDocument<128> doc;
     doc["temperature"]    = round(lastTemp     * 100.0f) / 100.0f;
@@ -242,10 +303,16 @@ void loop() {
     if (!mqtt.connected()) connectMQTT();
     mqtt.loop();
 
+    if (sessionActive) pollAudio();
+
     if (sessionActive && millis() - lastPublishMs >= PUBLISH_INTERVAL_MS) {
         publishReading();
-        updateDisplay();
         lastPublishMs = millis();
+    }
+
+    if (displayDirty) {
+        updateDisplay();
+        displayDirty = false;
     }
 
     delay(10);
