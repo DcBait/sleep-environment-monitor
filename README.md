@@ -33,7 +33,8 @@ graph LR
 firmware/          PlatformIO ESP32 project
 data_pipeline/
   simulator/       Fake sensor publisher (dev/testing)
-  subscriber/      MQTT → PostgreSQL writer
+  subscriber/      MQTT → PostgreSQL writer (Python)
+  subscriber_rs/   MQTT → PostgreSQL writer (Rust, same behavior as subscriber/)
   dbt/             Three-layer dbt models
 ml/                Edge Impulse TinyML artifacts
 summary_bot/       LLM morning summary + Telegram
@@ -61,7 +62,7 @@ Topic: `sleep/sensors`
 |---|---|
 | Firmware | C++ / PlatformIO / ESP32 WROOM-32D |
 | Broker | Mosquitto on Oracle Cloud A1.Flex (Ubuntu 22.04 ARM) |
-| Ingestion | Python / paho-mqtt / psycopg2 |
+| Ingestion | Python / paho-mqtt / psycopg2 (also available as a Rust port: rumqttc / tokio-postgres) |
 | Database | PostgreSQL |
 | Transform | dbt-postgres |
 | Viz | Grafana |
